@@ -91,14 +91,14 @@ class InteractiveRenderWrapper(gym.Wrapper if gym else object):
             )
 
     @contextmanager
-    def render_settings(self, fps: int = 30):
+    def animation(self, fps: int = 30):
         """Context manager for recording animations.
 
         Args:
             fps: Frames per second for the animation
 
         Usage:
-            with env.render_settings(fps=30):
+            with env.animation(fps=30):
                 for _ in range(100):
                     env.step(action)
                     env.render()

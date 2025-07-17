@@ -13,7 +13,7 @@ class TestMujocoRender:
         pytest.importorskip("mujoco")
 
         import mujoco
-        from sim_render import MujocoRender
+        from sim_render.mujoco import MujocoRender
 
         # Create a simple MuJoCo model
         xml = """
@@ -49,12 +49,3 @@ class TestMujocoRender:
             assert os.path.exists(tmp.name)
             os.unlink(tmp.name)
 
-    def test_mujoco_render_without_mujoco(self):
-        """Test that MujocoRender is None when mujoco not available."""
-        from sim_render import MujocoRender
-
-        if MujocoRender is None:
-            pytest.skip("MuJoCo not available")
-        else:
-            # If MuJoCo is available, test that it can be imported
-            assert MujocoRender is not None
