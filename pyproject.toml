@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sim_render"
+version = "0.1.0"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "pygltflib",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[dependency-groups]
+dev = [
+    "gymnasium>=1.1.1",
+    "imageio>=2.35.1",
+    "mujoco>=3.2.3",
+    "pytest>=8.3.5",
+    "ruff>=0.12.4",
+]
