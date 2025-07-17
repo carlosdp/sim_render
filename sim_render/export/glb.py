@@ -1,7 +1,6 @@
 """GLB export functionality."""
 
 import numpy as np
-import struct
 from typing import List, Dict, Any, Optional, Tuple
 import pygltflib
 

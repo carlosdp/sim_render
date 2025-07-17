@@ -1,7 +1,6 @@
 """Test ModelBuilder functionality."""
 
 import numpy as np
-import pytest
 import os
 import tempfile
 

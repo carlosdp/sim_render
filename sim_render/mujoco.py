@@ -1,8 +1,7 @@
 """MuJoCo model building and rendering utilities."""
 
 import numpy as np
-from typing import Optional, Dict, List, Tuple, Any
-from dataclasses import dataclass
+from typing import Optional, List, Tuple, Any
 import warnings
 
 try:

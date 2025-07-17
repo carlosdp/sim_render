@@ -1,9 +1,8 @@
 """Gymnasium environment wrapper for interactive rendering."""
 
 import warnings
-from typing import Optional, Any, Dict
+from typing import Optional
 from contextlib import contextmanager
-import numpy as np
 
 try:
     import gymnasium as gym

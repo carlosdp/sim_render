@@ -1,6 +1,6 @@
 import struct
 from dataclasses import dataclass, field
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 
 import numpy as np
 from pygltflib import (
