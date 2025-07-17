@@ -3,6 +3,7 @@
 import warnings
 from typing import Optional
 from contextlib import contextmanager
+import importlib
 
 try:
     import gymnasium as gym
@@ -12,12 +13,8 @@ except ImportError:
         "Gymnasium not available. InteractiveRenderWrapper will not be available."
     )
 
-try:
-    import mujoco
 
-    MUJOCO_AVAILABLE = True
-except ImportError:
-    MUJOCO_AVAILABLE = False
+MUJOCO_AVAILABLE = importlib.util.find_spec("mujoco")
 
 
 class InteractiveRenderWrapper(gym.Wrapper if gym else object):

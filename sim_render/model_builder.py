@@ -236,25 +236,6 @@ class ModelBuilder:
             dtype=np.float32,
         )
 
-        # Face indices (two triangles per face)
-        faces = np.array(
-            [
-                [0, 1, 2],
-                [0, 2, 3],  # Back
-                [4, 6, 5],
-                [4, 7, 6],  # Front
-                [0, 4, 5],
-                [0, 5, 1],  # Bottom
-                [2, 6, 7],
-                [2, 7, 3],  # Top
-                [0, 3, 7],
-                [0, 7, 4],  # Left
-                [1, 5, 6],
-                [1, 6, 2],  # Right
-            ],
-            dtype=np.uint32,
-        )
-
         # Expand vertices for each face (6 faces * 4 vertices = 24 vertices)
         face_vertices = []
         face_normals = []

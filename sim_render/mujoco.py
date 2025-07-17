@@ -2,15 +2,6 @@
 
 import numpy as np
 from typing import Optional, List, Tuple, Any
-import warnings
-
-try:
-    import mujoco
-
-    MUJOCO_AVAILABLE = True
-except ImportError:
-    MUJOCO_AVAILABLE = False
-    warnings.warn("MuJoCo not available. MuJoCo-specific features will be disabled.")
 
 from .model_builder import ModelBuilder, RawMesh, quaternion_to_matrix
 
@@ -21,8 +12,6 @@ def extract_mujoco_geometry(model) -> Tuple[List[Any], Optional[Any]]:
     Returns:
         Tuple of (bodies, camera_data)
     """
-    if not MUJOCO_AVAILABLE:
-        raise ImportError("MuJoCo is required for this functionality")
 
     bodies = []
     camera_data = None
@@ -160,8 +149,6 @@ class MujocoRender:
         Args:
             model: MuJoCo MjModel instance
         """
-        if not MUJOCO_AVAILABLE:
-            raise ImportError("MuJoCo is required for MujocoRender")
 
         self.model = model
         self.model_builder = ModelBuilder()
