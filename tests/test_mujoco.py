@@ -48,4 +48,3 @@ class TestMujocoRender:
             render.save(tmp.name)
             assert os.path.exists(tmp.name)
             os.unlink(tmp.name)
-

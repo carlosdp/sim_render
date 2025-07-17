@@ -39,4 +39,3 @@ class TestInteractiveRenderWrapper:
 
         except Exception as e:
             pytest.skip(f"MuJoCo environment not available: {e}")
-
