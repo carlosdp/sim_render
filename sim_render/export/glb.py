@@ -19,61 +19,90 @@ def export_to_glb(model_builder, filename: str):
     # Binary buffer for all data
     binary_data = bytearray()
 
+    # Create root transformation node for MuJoCo→GLB coordinate conversion
+    # MuJoCo: X-right, Y-forward, Z-up
+    # GLB: X-right, Y-up, Z-backward
+    # This is equivalent to rotating 90° around X-axis, then 180° around Y-axis
+    root_transform_matrix = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])
+    root_quaternion = matrix_to_quaternion(root_transform_matrix)
+
+    root_node = pygltflib.Node(
+        name="mujoco_to_gltf_root", rotation=root_quaternion.tolist(), children=[]
+    )
+
+    gltf.nodes = [root_node]
+    gltf.scenes[0].nodes = [0]  # Scene contains only the root node
+
     # Get encoded bodies
     bodies = model_builder.get_encoded_bodies()
+
+    # Track body node indices for animation
+    body_node_indices = {}
 
     # Process each body
     for body_data in bodies:
         body_id = body_data["body_id"]
         meshes_data = body_data["meshes"]
-        transform = body_data["transform"]
-        is_plane = body_data.get("is_plane", False)
+        body_transform = body_data["transform"]
 
         # Create a node for this body
-        node = pygltflib.Node(name=f"body_{body_id}")
+        body_node = pygltflib.Node(name=f"body_{body_id}")
 
-        # Set transform
-        position = transform[:3, 3]
-        rotation_matrix = transform[:3, :3]
+        # Set body transform
+        position = body_transform[:3, 3]
+        rotation_matrix = body_transform[:3, :3]
 
         # Convert rotation matrix to quaternion
         quaternion = matrix_to_quaternion(rotation_matrix)
 
-        node.translation = position.tolist()
-        node.rotation = quaternion.tolist()
+        body_node.translation = position.tolist()
+        body_node.rotation = quaternion.tolist()
+        body_node.children = []
 
-        # Process meshes
-        mesh_indices = []
-        for mesh_data in meshes_data:
-            mesh_index = _add_mesh_to_gltf(gltf, binary_data, mesh_data, is_plane)
-            mesh_indices.append(mesh_index)
+        # Process each mesh with its individual transform
+        for i, mesh_data in enumerate(meshes_data):
+            mesh_is_plane = mesh_data.get("is_plane", False)
 
-        # If multiple meshes, create child nodes
-        if len(mesh_indices) == 1:
-            node.mesh = mesh_indices[0]
-        else:
-            node.children = []
-            for i, mesh_idx in enumerate(mesh_indices):
-                child_node = pygltflib.Node(
-                    name=f"body_{body_id}_mesh_{i}", mesh=mesh_idx
-                )
-                child_idx = len(gltf.nodes)
-                gltf.nodes.append(child_node)
-                node.children.append(child_idx)
+            # Create mesh and add to glTF
+            mesh_index = _add_mesh_to_gltf(gltf, binary_data, mesh_data, mesh_is_plane)
 
-        # Add node to scene
+            # Handle mesh position and rotation (old format)
+            if "position" in mesh_data and "rotation" in mesh_data:
+                # Old format: position and rotation are separate
+                mesh_position = mesh_data["position"]
+                mesh_rotation = mesh_data["rotation"]  # Already in [x, y, z, w] format
+            else:
+                # New format: use transform matrix
+                mesh_transform = mesh_data.get("transform", np.eye(4))
+                mesh_position = mesh_transform[:3, 3].tolist()
+                mesh_rotation_matrix = mesh_transform[:3, :3]
+                mesh_rotation = matrix_to_quaternion(mesh_rotation_matrix).tolist()
+
+            child_node = pygltflib.Node(
+                name=f"body_{body_id}_mesh_{i}",
+                mesh=mesh_index,
+                translation=mesh_position,
+                rotation=mesh_rotation,
+            )
+
+            child_idx = len(gltf.nodes)
+            gltf.nodes.append(child_node)
+            body_node.children.append(child_idx)
+
+        # Add body node as child of root node
         node_idx = len(gltf.nodes)
-        gltf.nodes.append(node)
-        gltf.scenes[0].nodes.append(node_idx)
+        gltf.nodes.append(body_node)
+        gltf.nodes[0].children.append(node_idx)  # Add to root node
+        body_node_indices[body_id] = node_idx  # Track for animation
 
     # Add camera if present
     if model_builder.camera:
-        _add_camera_to_gltf(gltf, model_builder.camera)
+        _add_camera_to_gltf(gltf, model_builder.camera, root_node_idx=0)
 
     # Handle animations
     if model_builder.animation_frames:
         _add_animation_to_gltf(
-            gltf, binary_data, model_builder.animation_frames, bodies
+            gltf, binary_data, model_builder.animation_frames, body_node_indices
         )
 
     # Set up the binary buffer
@@ -129,25 +158,58 @@ def _add_mesh_to_gltf(
         )
         attributes["COLOR_0"] = color_accessor
 
-    # Create primitive
+    # Set material
+    if colors is not None:
+        # Check if this is a plane - add checker pattern for planes
+        if is_plane:
+            # Create checker pattern material
+            material = pygltflib.Material(
+                name="checker_material",
+                doubleSided=True,
+                pbrMetallicRoughness=pygltflib.PbrMetallicRoughness(
+                    baseColorFactor=[0.9, 0.9, 0.9, 1.0],
+                    metallicFactor=0.0,
+                    roughnessFactor=0.8,
+                ),
+            )
+
+            # Add UV coordinates for checker pattern
+            if "TEXCOORD_0" not in attributes:
+                # Generate UV coordinates based on vertex positions
+                uvs = []
+                for vertex in vertices:
+                    # Use XZ coordinates for UV mapping on horizontal planes
+                    u = vertex[0] * 0.1  # Scale factor for checker size
+                    v = vertex[2] * 0.1
+                    uvs.append([u, v])
+
+                uvs = np.array(uvs, dtype=np.float32)
+                uv_accessor = _add_accessor(
+                    gltf, binary_data, uvs, pygltflib.FLOAT, pygltflib.VEC2
+                )
+                attributes["TEXCOORD_0"] = uv_accessor
+        else:
+            # Create material with vertex colors
+            material = pygltflib.Material(
+                name="vertex_color_material",
+                doubleSided=is_plane,
+                pbrMetallicRoughness=pygltflib.PbrMetallicRoughness(
+                    baseColorFactor=[1.0, 1.0, 1.0, 1.0],
+                    metallicFactor=0.0,
+                    roughnessFactor=0.5,
+                ),
+            )
+
+        material_idx = len(gltf.materials)
+        gltf.materials.append(material)
+
+    # Create primitive after material handling
     primitive = pygltflib.Primitive(
         attributes=attributes, indices=index_accessor, mode=pygltflib.TRIANGLES
     )
 
-    # Set material
+    # Set material if we created one
     if colors is not None:
-        # Create material with vertex colors
-        material = pygltflib.Material(
-            name="vertex_color_material",
-            doubleSided=is_plane,
-            pbrMetallicRoughness=pygltflib.PbrMetallicRoughness(
-                baseColorFactor=[1.0, 1.0, 1.0, 1.0],
-                metallicFactor=0.0,
-                roughnessFactor=0.5,
-            ),
-        )
-        material_idx = len(gltf.materials)
-        gltf.materials.append(material)
         primitive.material = material_idx
 
     # Create mesh
@@ -209,7 +271,7 @@ def _add_accessor(
     return accessor_idx
 
 
-def _add_camera_to_gltf(gltf: pygltflib.GLTF2, camera_data):
+def _add_camera_to_gltf(gltf: pygltflib.GLTF2, camera_data, root_node_idx=None):
     """Add a camera to the glTF scene."""
     # Create camera
     camera = pygltflib.Camera(
@@ -250,17 +312,20 @@ def _add_camera_to_gltf(gltf: pygltflib.GLTF2, camera_data):
     camera_node.translation = position.tolist()
     camera_node.rotation = quaternion.tolist()
 
-    # Add to scene
+    # Add to scene or root node
     node_idx = len(gltf.nodes)
     gltf.nodes.append(camera_node)
-    gltf.scenes[0].nodes.append(node_idx)
+    if root_node_idx is not None:
+        gltf.nodes[root_node_idx].children.append(node_idx)
+    else:
+        gltf.scenes[0].nodes.append(node_idx)
 
 
 def _add_animation_to_gltf(
     gltf: pygltflib.GLTF2,
     binary_data: bytearray,
     animation_frames: List[Tuple[float, Dict]],
-    bodies: List[Dict],
+    body_node_indices: Dict[int, int],
 ):
     """Add animation data to the glTF."""
     if not animation_frames:
@@ -286,12 +351,7 @@ def _add_animation_to_gltf(
     # Create channels and samplers for each animated body
     for body_id, frames in body_frames.items():
         # Find node index for this body
-        node_idx = None
-        for i, body_data in enumerate(bodies):
-            if body_data["body_id"] == body_id:
-                node_idx = i  # Assuming direct mapping
-                break
-
+        node_idx = body_node_indices.get(body_id)
         if node_idx is None:
             continue
 

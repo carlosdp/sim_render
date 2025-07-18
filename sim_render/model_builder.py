@@ -43,6 +43,8 @@ class ModelBuilder:
         self.camera: Optional[CameraData] = None
         self.animation_frames: List[Tuple[float, Dict[int, Dict[str, Any]]]] = []
         self._animation_started = False
+        # Compatibility with old GlbSceneBuilder interface
+        self.individual_meshes: List[Dict[str, Any]] = []
 
     def add_body(
         self,
@@ -92,6 +94,33 @@ class ModelBuilder:
 
         self.bodies[body_id].transform = transform
 
+    def add_mesh(
+        self,
+        body_id: int,
+        position: List[float],
+        rotation: List[float],
+        vertices: List[List[float]],
+        normals: List[List[float]],
+        indices: List[int],
+        color: List[float],
+    ) -> None:
+        """Add a mesh in the old GlbSceneBuilder format for compatibility."""
+        mesh = RawMesh(
+            vertices=np.array(vertices, dtype=np.float32),
+            normals=np.array(normals, dtype=np.float32),
+            indices=np.array(indices, dtype=np.uint32),
+            colors=np.tile(color, (len(vertices), 1)).astype(np.float32),
+        )
+
+        self.individual_meshes.append(
+            {
+                "body_id": body_id,
+                "position": position,
+                "rotation": rotation,
+                "mesh": mesh,
+            }
+        )
+
     def set_camera(
         self, position: np.ndarray, target: np.ndarray, up: np.ndarray, fov: float
     ):
@@ -126,18 +155,33 @@ class ModelBuilder:
 
         self.animation_frames.append((time, transforms))
 
-    def encode_mesh(self, mesh: RawMesh) -> Dict[str, Any]:
+    def encode_mesh(self, mesh_data) -> Dict[str, Any]:
         """Encode a mesh into a format suitable for export.
 
         Returns:
             Dict with encoded mesh data
         """
-        return {
-            "vertices": mesh.vertices,
-            "normals": mesh.normals,
-            "indices": mesh.indices,
-            "colors": mesh.colors,
-        }
+        if isinstance(mesh_data, dict) and "mesh" in mesh_data:
+            # New format with transform
+            mesh = mesh_data["mesh"]
+            return {
+                "vertices": mesh.vertices,
+                "normals": mesh.normals,
+                "indices": mesh.indices,
+                "colors": mesh.colors,
+                "transform": mesh_data.get("transform", np.eye(4)),
+                "is_plane": mesh_data.get("is_plane", False),
+            }
+        else:
+            # Old format - direct RawMesh
+            return {
+                "vertices": mesh_data.vertices,
+                "normals": mesh_data.normals,
+                "indices": mesh_data.indices,
+                "colors": mesh_data.colors,
+                "transform": np.eye(4),
+                "is_plane": False,
+            }
 
     def get_encoded_bodies(self) -> List[Dict[str, Any]]:
         """Get all bodies with encoded meshes.
@@ -145,6 +189,45 @@ class ModelBuilder:
         Returns:
             List of dicts with body data
         """
+        # If we have individual meshes (old format), use those
+        if self.individual_meshes:
+            # Group individual meshes by body_id
+            body_groups = {}
+            for mesh_data in self.individual_meshes:
+                body_id = mesh_data["body_id"]
+                if body_id not in body_groups:
+                    body_groups[body_id] = []
+                body_groups[body_id].append(mesh_data)
+
+            encoded = []
+            for body_id, meshes in body_groups.items():
+                encoded_meshes = []
+                for mesh_data in meshes:
+                    encoded_meshes.append(
+                        {
+                            "vertices": mesh_data["mesh"].vertices,
+                            "normals": mesh_data["mesh"].normals,
+                            "indices": mesh_data["mesh"].indices,
+                            "colors": mesh_data["mesh"].colors,
+                            "position": mesh_data["position"],
+                            "rotation": mesh_data["rotation"],
+                            "is_plane": self._is_plane_mesh(mesh_data["mesh"]),
+                        }
+                    )
+
+                encoded.append(
+                    {
+                        "body_id": body_id,
+                        "meshes": encoded_meshes,
+                        "transform": np.eye(4),  # Body transform is identity
+                        "is_plane": any(
+                            m.get("is_plane", False) for m in encoded_meshes
+                        ),
+                    }
+                )
+            return encoded
+
+        # Otherwise use the new format
         encoded = []
         for body_id, body in self.bodies.items():
             encoded_meshes = [self.encode_mesh(mesh) for mesh in body.meshes]
@@ -157,6 +240,10 @@ class ModelBuilder:
                 }
             )
         return encoded
+
+    def _is_plane_mesh(self, mesh: RawMesh) -> bool:
+        """Check if a mesh is a plane (all Z coordinates near 0)."""
+        return all(abs(v[2]) < 0.001 for v in mesh.vertices)
 
     def save_to_glb(self, filename: str):
         """Save the model to a GLB file.
@@ -198,8 +285,8 @@ class ModelBuilder:
                 first = r * (sectors + 1) + s
                 second = first + sectors + 1
 
-                indices.extend([first, second, first + 1])
-                indices.extend([second, second + 1, first + 1])
+                indices.extend([first, first + 1, second])
+                indices.extend([first + 1, second + 1, second])
 
         vertices = np.array(vertices, dtype=np.float32)
         normals = np.array(normals, dtype=np.float32)
@@ -329,6 +416,179 @@ class ModelBuilder:
         return RawMesh(
             vertices=vertices, normals=normals, indices=indices, colors=colors
         )
+
+    @staticmethod
+    def generate_capsule_mesh(
+        radius: float = 1.0,
+        half_length: float = 1.0,
+        rings: int = 8,
+        sectors: int = 16,
+        color: Optional[np.ndarray] = None,
+    ) -> RawMesh:
+        """Generate a capsule mesh (cylinder with hemispherical caps).
+
+        Args:
+            radius: Radius of the capsule
+            half_length: Half the length of the cylindrical part
+            rings: Number of horizontal rings for spherical caps
+            sectors: Number of sectors around the capsule
+            color: Optional RGBA color
+
+        Returns:
+            RawMesh: The generated capsule mesh
+        """
+        vertices = []
+        normals = []
+        indices = []
+
+        # Generate top hemisphere
+        for r in range(rings + 1):
+            phi = (np.pi / 2) * r / rings  # Only go from 0 to pi/2
+            y = half_length + radius * np.sin(phi)
+            ring_radius = radius * np.cos(phi)
+
+            for s in range(sectors + 1):
+                theta = 2 * np.pi * s / sectors
+
+                x = ring_radius * np.cos(theta)
+                z = ring_radius * np.sin(theta)
+
+                vertices.append([x, y, z])
+
+                # Normal for hemisphere
+                ny = np.sin(phi)
+                nr = np.cos(phi)
+                normals.append([nr * np.cos(theta), ny, nr * np.sin(theta)])
+
+        # Generate cylinder
+        cylinder_rings = 2  # Just top and bottom of cylinder
+        for r in range(cylinder_rings):
+            y = half_length if r == 0 else -half_length
+
+            for s in range(sectors + 1):
+                theta = 2 * np.pi * s / sectors
+
+                x = radius * np.cos(theta)
+                z = radius * np.sin(theta)
+
+                vertices.append([x, y, z])
+                normals.append([np.cos(theta), 0, np.sin(theta)])
+
+        # Generate bottom hemisphere
+        for r in range(rings + 1):
+            phi = (np.pi / 2) * r / rings
+            y = -half_length - radius * np.sin(phi)
+            ring_radius = radius * np.cos(phi)
+
+            for s in range(sectors + 1):
+                theta = 2 * np.pi * s / sectors
+
+                x = ring_radius * np.cos(theta)
+                z = ring_radius * np.sin(theta)
+
+                vertices.append([x, y, z])
+
+                # Normal for hemisphere
+                ny = -np.sin(phi)
+                nr = np.cos(phi)
+                normals.append([nr * np.cos(theta), ny, nr * np.sin(theta)])
+
+        # Generate indices
+        # Top hemisphere - keep original winding
+        for r in range(rings):
+            for s in range(sectors):
+                first = r * (sectors + 1) + s
+                second = first + sectors + 1
+
+                indices.extend([first, second, first + 1])
+                indices.extend([second, second + 1, first + 1])
+
+        # Cylinder
+        top_cap_end = (rings + 1) * (sectors + 1)
+        for s in range(sectors):
+            # Connect top hemisphere to cylinder - corrected winding
+            hem_idx = rings * (sectors + 1) + s
+            cyl_idx = top_cap_end + s
+
+            indices.extend([hem_idx, hem_idx + 1, cyl_idx])
+            indices.extend([hem_idx + 1, cyl_idx + 1, cyl_idx])
+
+            # Connect cylinder sides - corrected winding
+            top_idx = top_cap_end + s
+            bot_idx = top_cap_end + (sectors + 1) + s
+
+            indices.extend([top_idx, top_idx + 1, bot_idx])
+            indices.extend([top_idx + 1, bot_idx + 1, bot_idx])
+
+            # Connect cylinder to bottom hemisphere - corrected winding
+            cyl_bot_idx = top_cap_end + (sectors + 1) + s
+            hem_bot_idx = top_cap_end + 2 * (sectors + 1) + s
+
+            indices.extend([cyl_bot_idx, cyl_bot_idx + 1, hem_bot_idx])
+            indices.extend([cyl_bot_idx + 1, hem_bot_idx + 1, hem_bot_idx])
+
+        # Bottom hemisphere - inverted winding
+        bot_hem_start = top_cap_end + 2 * (sectors + 1)
+        for r in range(rings):
+            for s in range(sectors):
+                first = bot_hem_start + r * (sectors + 1) + s
+                second = first + sectors + 1
+
+                indices.extend([first, first + 1, second])
+                indices.extend([first + 1, second + 1, second])
+
+        vertices = np.array(vertices, dtype=np.float32)
+        normals = np.array(normals, dtype=np.float32)
+        indices = np.array(indices, dtype=np.uint32)
+
+        if color is not None:
+            colors = np.tile(color, (len(vertices), 1))
+        else:
+            colors = np.ones((len(vertices), 4), dtype=np.float32)
+
+        return RawMesh(
+            vertices=vertices, normals=normals, indices=indices, colors=colors
+        )
+
+
+def triangulate_and_compute_normals(
+    vertices: List[List[float]], indices: List[int]
+) -> Tuple[List[List[float]], List[List[float]], List[int]]:
+    """
+    Triangulate mesh and compute per-vertex normals.
+    Returns new vertices, normals, and indices with proper triangulation.
+    """
+    assert len(indices) % 3 == 0, "Indices must be divisible by 3 for triangles"
+
+    tri_count = len(indices) // 3
+    new_vertices = []
+    new_normals = []
+    new_indices = []
+
+    for t in range(tri_count):
+        # Get triangle vertices
+        i0, i1, i2 = indices[t * 3], indices[t * 3 + 1], indices[t * 3 + 2]
+        v0 = np.array(vertices[i0])
+        v1 = np.array(vertices[i1])
+        v2 = np.array(vertices[i2])
+
+        # Compute normal using cross product
+        edge1 = v1 - v0
+        edge2 = v2 - v0
+        normal = np.cross(edge1, edge2)
+        norm_len = np.linalg.norm(normal)
+        if norm_len > 1e-6:
+            normal = normal / norm_len
+        else:
+            normal = np.array([0.0, 0.0, 1.0])
+
+        # Add vertices and normals
+        base_idx = len(new_vertices)
+        new_vertices.extend([v0.tolist(), v1.tolist(), v2.tolist()])
+        new_normals.extend([normal.tolist()] * 3)
+        new_indices.extend([base_idx, base_idx + 1, base_idx + 2])
+
+    return new_vertices, new_normals, new_indices
 
 
 def quaternion_to_matrix(quat: np.ndarray) -> np.ndarray:
