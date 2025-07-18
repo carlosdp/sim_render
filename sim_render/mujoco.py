@@ -513,64 +513,64 @@ class MujocoRender:
         # Generate top hemisphere
         for r in range(rings + 1):
             phi = (np.pi / 2) * r / rings  # Only go from 0 to pi/2
-            y = half_length + radius * np.sin(phi)
+            z = half_length + radius * np.sin(phi)
             ring_radius = radius * np.cos(phi)
 
             for s in range(sectors + 1):
                 theta = 2 * np.pi * s / sectors
 
                 x = ring_radius * np.cos(theta)
-                z = ring_radius * np.sin(theta)
+                y = ring_radius * np.sin(theta)
 
                 vertices.append([x, y, z])
 
                 # Normal for hemisphere
-                ny = np.sin(phi)
+                nz = np.sin(phi)
                 nr = np.cos(phi)
-                normals.append([nr * np.cos(theta), ny, nr * np.sin(theta)])
+                normals.append([nr * np.cos(theta), nr * np.sin(theta), nz])
 
         # Generate cylinder
         cylinder_rings = 2  # Just top and bottom of cylinder
         for r in range(cylinder_rings):
-            y = half_length if r == 0 else -half_length
+            z = half_length if r == 0 else -half_length
 
             for s in range(sectors + 1):
                 theta = 2 * np.pi * s / sectors
 
                 x = radius * np.cos(theta)
-                z = radius * np.sin(theta)
+                y = radius * np.sin(theta)
 
                 vertices.append([x, y, z])
-                normals.append([np.cos(theta), 0, np.sin(theta)])
+                normals.append([np.cos(theta), np.sin(theta), 0])
 
         # Generate bottom hemisphere
         for r in range(rings + 1):
             phi = (np.pi / 2) * r / rings
-            y = -half_length - radius * np.sin(phi)
+            z = -half_length - radius * np.sin(phi)
             ring_radius = radius * np.cos(phi)
 
             for s in range(sectors + 1):
                 theta = 2 * np.pi * s / sectors
 
                 x = ring_radius * np.cos(theta)
-                z = ring_radius * np.sin(theta)
+                y = ring_radius * np.sin(theta)
 
                 vertices.append([x, y, z])
 
                 # Normal for hemisphere
-                ny = -np.sin(phi)
+                nz = -np.sin(phi)
                 nr = np.cos(phi)
-                normals.append([nr * np.cos(theta), ny, nr * np.sin(theta)])
+                normals.append([nr * np.cos(theta), nr * np.sin(theta), nz])
 
         # Generate indices
-        # Top hemisphere
+        # Top hemisphere - flip winding for Z-axis orientation
         for r in range(rings):
             for s in range(sectors):
                 first = r * (sectors + 1) + s
                 second = first + sectors + 1
 
-                indices.extend([first, second, first + 1])
-                indices.extend([second, second + 1, first + 1])
+                indices.extend([first, first + 1, second])
+                indices.extend([first + 1, second + 1, second])
 
         # Cylinder
         top_cap_end = (rings + 1) * (sectors + 1)
@@ -582,12 +582,12 @@ class MujocoRender:
             indices.extend([hem_idx, hem_idx + 1, cyl_idx])
             indices.extend([hem_idx + 1, cyl_idx + 1, cyl_idx])
 
-            # Connect cylinder sides
+            # Connect cylinder sides - flip winding for Z-axis orientation
             top_idx = top_cap_end + s
             bot_idx = top_cap_end + (sectors + 1) + s
 
-            indices.extend([top_idx, top_idx + 1, bot_idx])
-            indices.extend([top_idx + 1, bot_idx + 1, bot_idx])
+            indices.extend([top_idx, bot_idx, top_idx + 1])
+            indices.extend([top_idx + 1, bot_idx, bot_idx + 1])
 
             # Connect cylinder to bottom hemisphere
             cyl_bot_idx = top_cap_end + (sectors + 1) + s
@@ -596,15 +596,15 @@ class MujocoRender:
             indices.extend([cyl_bot_idx, cyl_bot_idx + 1, hem_bot_idx])
             indices.extend([cyl_bot_idx + 1, hem_bot_idx + 1, hem_bot_idx])
 
-        # Bottom hemisphere
+        # Bottom hemisphere - flip winding for Z-axis orientation
         bot_hem_start = top_cap_end + 2 * (sectors + 1)
         for r in range(rings):
             for s in range(sectors):
                 first = bot_hem_start + r * (sectors + 1) + s
                 second = first + sectors + 1
 
-                indices.extend([first, first + 1, second])
-                indices.extend([first + 1, second + 1, second])
+                indices.extend([first, second, first + 1])
+                indices.extend([second, second + 1, first + 1])
 
         return vertices, normals, indices
 
