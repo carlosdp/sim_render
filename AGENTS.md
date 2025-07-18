@@ -4,6 +4,10 @@
 
 `sim_render` is a Python package designed to easily render robotic simulation environments to GLB format, including animations for episodes. The package provides seamless integration with popular robotics simulation frameworks like Gymnasium and MuJoCo, enabling researchers and developers to export their simulation data for visualization, analysis, and sharing.
 
+## Notes
+
+- This codebase uses `uv`, so use `uv run` when running python commands and scripts and such
+
 ## Code Layout
 
 ```
