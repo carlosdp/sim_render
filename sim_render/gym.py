@@ -13,6 +13,8 @@ except ImportError:
         "Gymnasium not available. InteractiveRenderWrapper will not be available."
     )
 
+from .viewer import GLBViewer
+
 
 MUJOCO_AVAILABLE = importlib.util.find_spec("mujoco")
 
@@ -115,6 +117,7 @@ class InteractiveRenderWrapper(gym.Wrapper if gym else object):
         """
         if self._mujoco_render is not None:
             self._mujoco_render.save(filename)
+            self._last_saved_path = filename
         else:
             raise RuntimeError(
                 "No render data available. Make sure to call render() first."
@@ -128,3 +131,22 @@ class InteractiveRenderWrapper(gym.Wrapper if gym else object):
             filename: Output filename
         """
         self.save(filename)
+
+    def _repr_html_(self) -> str:
+        """Return HTML representation for Jupyter notebook display."""
+        # If we have a MujocoRender, delegate to it
+        if self._mujoco_render is not None:
+            return self._mujoco_render._repr_html_()
+
+        # Otherwise, save to a temporary file if not already saved
+        if not hasattr(self, "_last_saved_path"):
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as f:
+                temp_path = f.name
+            self.save(temp_path)
+            self._last_saved_path = temp_path
+
+        # Create a GLBViewer and return its HTML representation
+        viewer = GLBViewer(self._last_saved_path)
+        return viewer._repr_html_()

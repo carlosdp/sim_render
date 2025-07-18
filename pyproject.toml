@@ -18,6 +18,7 @@ where = ["."]
 dev = [
     "gymnasium>=1.1.1",
     "imageio>=2.35.1",
+    "marimo>=0.8.22",
     "mujoco>=3.2.3",
     "pytest>=8.3.5",
     "ruff>=0.12.4",

@@ -4,6 +4,7 @@ import numpy as np
 from typing import Optional, List, Tuple, Any
 
 from .model_builder import ModelBuilder, RawMesh, quaternion_to_matrix
+from .viewer import GLBViewer
 
 
 def extract_mujoco_geometry(model) -> Tuple[List[Any], Optional[Any]]:
@@ -12,6 +13,10 @@ def extract_mujoco_geometry(model) -> Tuple[List[Any], Optional[Any]]:
     Returns:
         Tuple of (bodies, camera_data)
     """
+    try:
+        import mujoco
+    except ImportError:
+        raise ImportError("MuJoCo is required for extract_mujoco_geometry")
 
     bodies = []
     camera_data = None
@@ -257,6 +262,22 @@ class MujocoRender:
             self.prepare()
 
         self.model_builder.save_to_glb(filename)
+        self._last_saved_path = filename
+
+    def _repr_html_(self) -> str:
+        """Return HTML representation for Jupyter notebook display."""
+        # Save to a temporary file if not already saved
+        if not hasattr(self, "_last_saved_path"):
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as f:
+                temp_path = f.name
+            self.save(temp_path)
+            self._last_saved_path = temp_path
+
+        # Create a GLBViewer and return its HTML representation
+        viewer = GLBViewer(self._last_saved_path)
+        return viewer._repr_html_()
 
 
 class _AnimationContext:

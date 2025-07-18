@@ -12,8 +12,8 @@ sim_render/
 ├── model_builder.py           # Core 3D scene construction (ModelBuilder class)
 ├── gym.py                     # Gymnasium environment wrapper (InteractiveRenderWrapper)
 ├── mujoco.py                  # MuJoCo integration (MujocoRender class)
-├── mujoco_export.py           # MuJoCo geometry extraction utilities
 ├── glb_builder.py             # GLB format building utilities
+├── viewer.py                  # GLBViewer class for notebook/web rendering with ThreeJS
 └── export/
     ├── __init__.py
     └── glb.py                 # GLB export functionality using pygltflib
