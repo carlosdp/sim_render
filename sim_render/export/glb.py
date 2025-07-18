@@ -98,6 +98,18 @@ def export_to_glb(model_builder, filename: str):
     # Add camera if present
     if model_builder.camera:
         _add_camera_to_gltf(gltf, model_builder.camera, root_node_idx=0)
+    
+    # Add individual cameras attached to bodies
+    if hasattr(model_builder, 'individual_cameras'):
+        for camera_data in model_builder.individual_cameras:
+            body_id = camera_data["body_id"]
+            camera = camera_data["camera"]
+            position = camera_data["position"]
+            rotation = camera_data["rotation"]
+            
+            # Find the parent body node
+            parent_node_idx = body_node_indices.get(body_id, 0)  # Default to root if body not found
+            _add_camera_to_gltf(gltf, camera, root_node_idx=parent_node_idx, position=position, rotation=rotation)
 
     # Handle animations
     if model_builder.animation_frames:
@@ -271,7 +283,7 @@ def _add_accessor(
     return accessor_idx
 
 
-def _add_camera_to_gltf(gltf: pygltflib.GLTF2, camera_data, root_node_idx=None):
+def _add_camera_to_gltf(gltf: pygltflib.GLTF2, camera_data, root_node_idx=None, position=None, rotation=None):
     """Add a camera to the glTF scene."""
     # Create camera
     camera = pygltflib.Camera(
@@ -284,33 +296,39 @@ def _add_camera_to_gltf(gltf: pygltflib.GLTF2, camera_data, root_node_idx=None):
     # Create camera node
     camera_node = pygltflib.Node(name="camera", camera=camera_idx)
 
-    # Set camera transform using look-at
-    position = camera_data.position
-    target = camera_data.target
-    up = camera_data.up
+    # Set camera transform
+    if position is not None and rotation is not None:
+        # Use provided position and rotation (from body-attached cameras)
+        camera_node.translation = position
+        camera_node.rotation = rotation
+    else:
+        # Use camera_data look-at transform (for global cameras)
+        position = camera_data.position
+        target = camera_data.target
+        up = camera_data.up
 
-    # Calculate camera orientation
-    forward = target - position
-    forward = forward / np.linalg.norm(forward)
+        # Calculate camera orientation
+        forward = target - position
+        forward = forward / np.linalg.norm(forward)
 
-    right = np.cross(forward, up)
-    right = right / np.linalg.norm(right)
+        right = np.cross(forward, up)
+        right = right / np.linalg.norm(right)
 
-    up = np.cross(right, forward)
+        up = np.cross(right, forward)
 
-    # Build rotation matrix (camera looks down -Z)
-    rotation_matrix = np.array(
-        [
-            [right[0], up[0], -forward[0]],
-            [right[1], up[1], -forward[1]],
-            [right[2], up[2], -forward[2]],
-        ]
-    )
+        # Build rotation matrix (camera looks down -Z)
+        rotation_matrix = np.array(
+            [
+                [right[0], up[0], -forward[0]],
+                [right[1], up[1], -forward[1]],
+                [right[2], up[2], -forward[2]],
+            ]
+        )
 
-    quaternion = matrix_to_quaternion(rotation_matrix)
+        quaternion = matrix_to_quaternion(rotation_matrix)
 
-    camera_node.translation = position.tolist()
-    camera_node.rotation = quaternion.tolist()
+        camera_node.translation = position.tolist()
+        camera_node.rotation = quaternion.tolist()
 
     # Add to scene or root node
     node_idx = len(gltf.nodes)

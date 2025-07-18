@@ -9,13 +9,26 @@ def _():
     import marimo as mo
     import gymnasium as gym
     from sim_render.gym import InteractiveRenderWrapper
-    return InteractiveRenderWrapper, gym
+    return InteractiveRenderWrapper, gym, mo
 
 
 @app.cell
-def _(InteractiveRenderWrapper, gym):
-    env = InteractiveRenderWrapper(gym.make("Ant-v5"))
+def _(gym, mo):
+    gym_env = gym.make("Ant-v5", render_mode="rgb_array")
+    gym_env.reset(seed=42)
+
+    mo.image(gym_env.render())
+    return (gym_env,)
+
+
+@app.cell
+def _(InteractiveRenderWrapper, gym_env):
+    env = InteractiveRenderWrapper(gym_env)
     env.reset(seed=42)
+
+    with env.animation():
+        env.render()
+
     env
     return (env,)
 

@@ -7,43 +7,19 @@ from .model_builder import ModelBuilder, RawMesh, quaternion_to_matrix
 from .viewer import GLBViewer
 
 
-def extract_mujoco_geometry(model) -> Tuple[List[Any], Optional[Any]]:
+def extract_mujoco_geometry(model) -> List[Any]:
     """Extract geometry data from a MuJoCo model.
 
     Returns:
-        Tuple of (bodies, camera_data)
+        List of bodies with their geometries and cameras
     """
     try:
         import mujoco
     except ImportError:
         raise ImportError("MuJoCo is required for extract_mujoco_geometry")
 
-    # Create a dict to group geometries by body
-    body_geometries = {}
-    camera_data = None
-
-    # Extract camera if present
-    if model.ncam > 0:
-        cam_id = 0
-        cam_pos = convert_mujoco_to_gltf_position(model.cam_pos[cam_id])
-        cam_quat = model.cam_quat[cam_id]
-        cam_fovy = model.cam_fovy[cam_id]
-
-        # Convert quaternion to rotation matrix
-        cam_mat = quaternion_to_matrix(cam_quat)
-
-        # Camera forward is -Z in camera space
-        cam_forward = -cam_mat[2]
-        cam_up = cam_mat[1]
-
-        from .model_builder import CameraData
-
-        camera_data = CameraData(
-            position=cam_pos.copy(),
-            target=cam_pos + cam_forward,
-            up=cam_up.copy(),
-            fov=np.radians(cam_fovy),
-        )
+    # Create a dict to group geometries and cameras by body
+    body_data = {}
 
     # Process each body to collect geometries
     for body_id in range(model.nbody):
@@ -151,25 +127,63 @@ def extract_mujoco_geometry(model) -> Tuple[List[Any], Optional[Any]]:
                 meshes.append(mesh_with_transform)
 
         if meshes:
-            if body_id not in body_geometries:
-                body_geometries[body_id] = []
-            body_geometries[body_id].extend(meshes)
+            if body_id not in body_data:
+                body_data[body_id] = {"meshes": [], "cameras": []}
+            body_data[body_id]["meshes"].extend(meshes)
+
+    # Process cameras and assign them to bodies
+    for cam_id in range(model.ncam):
+        cam_body_id = model.cam_bodyid[cam_id]
+        cam_pos = model.cam_pos[cam_id]
+        cam_quat = model.cam_quat[cam_id]
+        cam_fovy = model.cam_fovy[cam_id]
+
+        # Convert quaternion to rotation matrix
+        cam_mat = quaternion_to_matrix(cam_quat)
+
+        # Camera forward is -Z in camera space
+        cam_forward = -cam_mat[2]
+        cam_up = cam_mat[1]
+
+        from .model_builder import CameraData
+
+        camera_data = CameraData(
+            position=cam_pos.copy(),
+            target=cam_pos + cam_forward,
+            up=cam_up.copy(),
+            fov=np.radians(cam_fovy),
+        )
+
+        # Create transform matrix for camera
+        transform = np.eye(4)
+        transform[:3, :3] = quaternion_to_matrix(quat_wxyz_to_xyzw(cam_quat))
+        transform[:3, 3] = cam_pos
+
+        camera_with_transform = {
+            "camera": camera_data,
+            "transform": transform,
+        }
+
+        if cam_body_id not in body_data:
+            body_data[cam_body_id] = {"meshes": [], "cameras": []}
+        body_data[cam_body_id]["cameras"].append(camera_with_transform)
 
     # Convert to list format
     bodies = []
-    for body_id, meshes in body_geometries.items():
+    for body_id, data in body_data.items():
         from .model_builder import BodyGeometry
 
         bodies.append(
             BodyGeometry(
                 body_id=body_id,
-                meshes=meshes,  # Store meshes with their individual transforms
+                meshes=data["meshes"],  # Store meshes with their individual transforms
+                cameras=data["cameras"],  # Store cameras with their transforms
                 transform=np.eye(4),  # Body-level transform is identity
-                is_plane=any(m["is_plane"] for m in meshes),
+                is_plane=any(m["is_plane"] for m in data["meshes"]),
             )
         )
 
-    return bodies, camera_data
+    return bodies
 
 
 def quat_mul(q1, q2):
@@ -309,8 +323,9 @@ class MujocoRender:
                         color,
                     )
 
-        # Add cameras - keep in MuJoCo coordinates
+        # Add cameras to their respective bodies
         for cam_id in range(model.ncam):
+            cam_body_id = model.cam_bodyid[cam_id]
             cam_pos = model.cam_pos[cam_id]  # Keep MuJoCo coordinates
             cam_quat = quat_wxyz_to_xyzw(
                 model.cam_quat[cam_id]
@@ -331,8 +346,23 @@ class MujocoRender:
                 fov=np.radians(cam_fovy),
             )
 
-            self.model_builder.camera = camera_data
-            break  # Only use first camera
+            # Create transform matrix for camera
+            transform = np.eye(4)
+            transform[:3, :3] = quaternion_to_matrix(cam_quat)
+            transform[:3, 3] = cam_pos
+
+            camera_with_transform = {
+                "camera": camera_data,
+                "transform": transform,
+            }
+
+            # Add camera to the body by creating a mesh entry for it
+            self.model_builder.add_camera(
+                cam_body_id,
+                cam_pos.tolist(),
+                cam_quat.tolist(),
+                camera_data,
+            )
 
         self._prepared = True
 

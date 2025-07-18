@@ -130,11 +130,57 @@ class GLBViewer:
                     
                     // Handle camera if defined in GLB
                     if (gltf.cameras && gltf.cameras.length > 0) {{
-                        // Use the first camera from the GLB
-                        const gltfCamera = gltf.cameras[0];
-                        camera.copy(gltfCamera);
-                        camera.aspect = canvas.clientWidth / canvas.clientHeight;
-                        camera.updateProjectionMatrix();
+                        // Find the first camera and its corresponding node
+                        let cameraNode = null;
+                        let targetCameraIndex = 0; // Use first camera
+                        
+                        gltf.scene.traverse((child) => {{
+                            if (child.isCamera && child.userData.camera === targetCameraIndex) {{
+                                cameraNode = child;
+                            }}
+                        }});
+                        
+                        // If we didn't find by userData, just get the first camera node
+                        if (!cameraNode) {{
+                            gltf.scene.traverse((child) => {{
+                                if (child.isCamera) {{
+                                    cameraNode = child;
+                                    return; // Stop at first camera found
+                                }}
+                            }});
+                        }}
+                        
+                        if (cameraNode) {{
+                            // Copy camera properties from GLB camera
+                            const gltfCamera = gltf.cameras[targetCameraIndex];
+                            if (gltfCamera.type === 'perspective' && gltfCamera.perspective) {{
+                                camera.fov = THREE.MathUtils.radToDeg(gltfCamera.perspective.yfov);
+                                camera.near = gltfCamera.perspective.znear || 0.1;
+                                camera.far = gltfCamera.perspective.zfar || 1000;
+                            }}
+                            
+                            // Get world transform from the camera node
+                            const worldPosition = new THREE.Vector3();
+                            const worldQuaternion = new THREE.Quaternion();
+                            const worldScale = new THREE.Vector3();
+                            cameraNode.matrixWorld.decompose(worldPosition, worldQuaternion, worldScale);
+                            
+                            // Apply transform to our camera
+                            camera.position.copy(worldPosition);
+                            camera.quaternion.copy(worldQuaternion);
+                            camera.aspect = canvas.clientWidth / canvas.clientHeight;
+                            camera.updateProjectionMatrix();
+                            
+                            // Calculate a reasonable target point in front of the camera
+                            const forward = new THREE.Vector3(0, 0, -1);
+                            forward.applyQuaternion(camera.quaternion);
+                            const target = camera.position.clone().add(forward.multiplyScalar(5));
+                            
+                            // Update controls
+                            controls.object = camera;
+                            controls.target.copy(target);
+                            controls.update();
+                        }}
                     }}
                     
                     // Clean up blob URL

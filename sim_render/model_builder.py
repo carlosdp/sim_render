@@ -23,6 +23,7 @@ class BodyGeometry:
     meshes: List[RawMesh]
     transform: np.ndarray  # 4x4 transformation matrix
     is_plane: bool = False
+    cameras: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclass
@@ -118,6 +119,27 @@ class ModelBuilder:
                 "position": position,
                 "rotation": rotation,
                 "mesh": mesh,
+            }
+        )
+
+    def add_camera(
+        self,
+        body_id: int,
+        position: List[float],
+        rotation: List[float],
+        camera_data: CameraData,
+    ) -> None:
+        """Add a camera to a specific body."""
+        # Add to the individual_cameras list for compatibility with existing export
+        if not hasattr(self, 'individual_cameras'):
+            self.individual_cameras = []
+        
+        self.individual_cameras.append(
+            {
+                "body_id": body_id,
+                "position": position,
+                "rotation": rotation,
+                "camera": camera_data,
             }
         )
 
