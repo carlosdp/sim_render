@@ -510,23 +510,28 @@ def _add_material_with_textures(
 
         # Generate UV coordinates based on vertex positions and material texrepeat
         if "TEXCOORD_0" not in attributes:
+            # Calculate bounding box for proper UV mapping
+            min_coords = np.min(vertices, axis=0)
+            max_coords = np.max(vertices, axis=0)
+            size = max_coords - min_coords
+            
             uvs = []
             for vertex in vertices:
                 # Check if this is a plane by looking at which coordinate is constant
                 if abs(vertex[2]) < 0.001:  # XY plane (Z near 0)
-                    # Map XY to UV
-                    u = (
-                        (vertex[0] + 2.0) / 4.0 * texrepeat[0]
-                    )  # Normalize to 0-1, then scale by texrepeat
-                    v = (vertex[1] + 2.0) / 4.0 * texrepeat[1]
+                    # Map XY to UV using actual plane dimensions
+                    u = (vertex[0] - min_coords[0]) / size[0] * texrepeat[0]
+                    v = (vertex[1] - min_coords[1]) / size[1] * texrepeat[1]
                 elif abs(vertex[1]) < 0.001:  # XZ plane (Y near 0)
-                    # Map XZ to UV
-                    u = (vertex[0] + 2.0) / 4.0 * texrepeat[0]
-                    v = (vertex[2] + 2.0) / 4.0 * texrepeat[1]
+                    # Map XZ to UV using actual plane dimensions
+                    u = (vertex[0] - min_coords[0]) / size[0] * texrepeat[0]
+                    v = (vertex[2] - min_coords[2]) / size[2] * texrepeat[1]
                 else:
-                    # Use XY projection for vertical surfaces
-                    u = vertex[0] * texrepeat[0] * 0.1
-                    v = vertex[1] * texrepeat[1] * 0.1
+                    # For non-planar surfaces, use a more conservative scaling
+                    # Use the largest dimension to normalize
+                    max_size = max(size[0], size[1], size[2])
+                    u = (vertex[0] - min_coords[0]) / max_size * texrepeat[0]
+                    v = (vertex[1] - min_coords[1]) / max_size * texrepeat[1]
                 uvs.append([u, v])
 
             uvs = np.array(uvs, dtype=np.float32)
