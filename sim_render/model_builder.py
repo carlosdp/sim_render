@@ -13,6 +13,7 @@ class RawMesh:
     normals: np.ndarray  # Shape: (N, 3)
     indices: np.ndarray  # Shape: (M,) flat array
     colors: Optional[np.ndarray] = None  # Shape: (N, 4) RGBA
+    material: Optional[Dict[str, Any]] = None  # Material and texture info
 
 
 @dataclass
@@ -104,6 +105,7 @@ class ModelBuilder:
         normals: List[List[float]],
         indices: List[int],
         color: List[float],
+        material: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Add a mesh in the old GlbSceneBuilder format for compatibility."""
         mesh = RawMesh(
@@ -111,6 +113,7 @@ class ModelBuilder:
             normals=np.array(normals, dtype=np.float32),
             indices=np.array(indices, dtype=np.uint32),
             colors=np.tile(color, (len(vertices), 1)).astype(np.float32),
+            material=material,
         )
 
         self.individual_meshes.append(
@@ -131,9 +134,9 @@ class ModelBuilder:
     ) -> None:
         """Add a camera to a specific body."""
         # Add to the individual_cameras list for compatibility with existing export
-        if not hasattr(self, 'individual_cameras'):
+        if not hasattr(self, "individual_cameras"):
             self.individual_cameras = []
-        
+
         self.individual_cameras.append(
             {
                 "body_id": body_id,
@@ -191,6 +194,7 @@ class ModelBuilder:
                 "normals": mesh.normals,
                 "indices": mesh.indices,
                 "colors": mesh.colors,
+                "material": mesh.material,
                 "transform": mesh_data.get("transform", np.eye(4)),
                 "is_plane": mesh_data.get("is_plane", False),
             }
@@ -201,6 +205,7 @@ class ModelBuilder:
                 "normals": mesh_data.normals,
                 "indices": mesh_data.indices,
                 "colors": mesh_data.colors,
+                "material": mesh_data.material,
                 "transform": np.eye(4),
                 "is_plane": False,
             }
@@ -231,6 +236,7 @@ class ModelBuilder:
                             "normals": mesh_data["mesh"].normals,
                             "indices": mesh_data["mesh"].indices,
                             "colors": mesh_data["mesh"].colors,
+                            "material": mesh_data["mesh"].material,
                             "position": mesh_data["position"],
                             "rotation": mesh_data["rotation"],
                             "is_plane": self._is_plane_mesh(mesh_data["mesh"]),

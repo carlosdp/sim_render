@@ -98,18 +98,26 @@ def export_to_glb(model_builder, filename: str):
     # Add camera if present
     if model_builder.camera:
         _add_camera_to_gltf(gltf, model_builder.camera, root_node_idx=0)
-    
+
     # Add individual cameras attached to bodies
-    if hasattr(model_builder, 'individual_cameras'):
+    if hasattr(model_builder, "individual_cameras"):
         for camera_data in model_builder.individual_cameras:
             body_id = camera_data["body_id"]
             camera = camera_data["camera"]
             position = camera_data["position"]
             rotation = camera_data["rotation"]
-            
+
             # Find the parent body node
-            parent_node_idx = body_node_indices.get(body_id, 0)  # Default to root if body not found
-            _add_camera_to_gltf(gltf, camera, root_node_idx=parent_node_idx, position=position, rotation=rotation)
+            parent_node_idx = body_node_indices.get(
+                body_id, 0
+            )  # Default to root if body not found
+            _add_camera_to_gltf(
+                gltf,
+                camera,
+                root_node_idx=parent_node_idx,
+                position=position,
+                rotation=rotation,
+            )
 
     # Handle animations
     if model_builder.animation_frames:
@@ -141,6 +149,7 @@ def _add_mesh_to_gltf(
     normals = mesh_data["normals"]
     indices = mesh_data["indices"]
     colors = mesh_data.get("colors")
+    material_info = mesh_data.get("material")
 
     # Create accessors for vertex data
     vertex_accessor = _add_accessor(
@@ -171,7 +180,13 @@ def _add_mesh_to_gltf(
         attributes["COLOR_0"] = color_accessor
 
     # Set material
-    if colors is not None:
+    material_idx = None
+    if material_info and material_info.get("textures"):
+        # Use MuJoCo material with textures
+        material_idx = _add_material_with_textures(
+            gltf, binary_data, material_info, vertices, attributes
+        )
+    elif colors is not None:
         # Check if this is a plane - add checker pattern for planes
         if is_plane:
             # Create checker pattern material
@@ -221,7 +236,7 @@ def _add_mesh_to_gltf(
     )
 
     # Set material if we created one
-    if colors is not None:
+    if material_idx is not None:
         primitive.material = material_idx
 
     # Create mesh
@@ -283,7 +298,9 @@ def _add_accessor(
     return accessor_idx
 
 
-def _add_camera_to_gltf(gltf: pygltflib.GLTF2, camera_data, root_node_idx=None, position=None, rotation=None):
+def _add_camera_to_gltf(
+    gltf: pygltflib.GLTF2, camera_data, root_node_idx=None, position=None, rotation=None
+):
     """Add a camera to the glTF scene."""
     # Create camera
     camera = pygltflib.Camera(
@@ -437,6 +454,194 @@ def _add_animation_to_gltf(
 
     if animation.channels:
         gltf.animations.append(animation)
+
+
+def _add_material_with_textures(
+    gltf: pygltflib.GLTF2,
+    binary_data: bytearray,
+    material_info: Dict[str, Any],
+    vertices: np.ndarray,
+    attributes: Dict[str, int],
+) -> int:
+    """Add a material with textures to the glTF.
+
+    Args:
+        gltf: glTF object
+        binary_data: Binary data buffer
+        material_info: Material information from MuJoCo
+        vertices: Vertex data for UV generation
+        attributes: Vertex attributes dict (modified in place)
+
+    Returns:
+        Material index
+    """
+    material_name = material_info.get("name", "mujoco_material")
+    material_rgba = material_info.get("rgba", [1.0, 1.0, 1.0, 1.0])
+    texrepeat = material_info.get("texrepeat", [1.0, 1.0])
+    textures = material_info.get("textures", {})
+
+    # Create material
+    material = pygltflib.Material(
+        name=material_name,
+        doubleSided=True,
+        pbrMetallicRoughness=pygltflib.PbrMetallicRoughness(
+            baseColorFactor=material_rgba.tolist()
+            if hasattr(material_rgba, "tolist")
+            else material_rgba,
+            metallicFactor=0.0,
+            roughnessFactor=0.8,
+        ),
+    )
+
+    # Add diffuse texture if available (check all texture slots for the first available texture)
+    texture_info = None
+    for slot in textures:
+        texture_info = textures[slot]
+        break  # Use the first available texture
+
+    if texture_info:
+        # Add texture to glTF
+        texture_idx = _add_texture_to_gltf(gltf, binary_data, texture_info)
+
+        # Set base color texture
+        material.pbrMetallicRoughness.baseColorTexture = pygltflib.TextureInfo(
+            index=texture_idx
+        )
+
+        # Generate UV coordinates based on vertex positions and material texrepeat
+        if "TEXCOORD_0" not in attributes:
+            uvs = []
+            for vertex in vertices:
+                # Check if this is a plane by looking at which coordinate is constant
+                if abs(vertex[2]) < 0.001:  # XY plane (Z near 0)
+                    # Map XY to UV
+                    u = (
+                        (vertex[0] + 2.0) / 4.0 * texrepeat[0]
+                    )  # Normalize to 0-1, then scale by texrepeat
+                    v = (vertex[1] + 2.0) / 4.0 * texrepeat[1]
+                elif abs(vertex[1]) < 0.001:  # XZ plane (Y near 0)
+                    # Map XZ to UV
+                    u = (vertex[0] + 2.0) / 4.0 * texrepeat[0]
+                    v = (vertex[2] + 2.0) / 4.0 * texrepeat[1]
+                else:
+                    # Use XY projection for vertical surfaces
+                    u = vertex[0] * texrepeat[0] * 0.1
+                    v = vertex[1] * texrepeat[1] * 0.1
+                uvs.append([u, v])
+
+            uvs = np.array(uvs, dtype=np.float32)
+            uv_accessor = _add_accessor(
+                gltf, binary_data, uvs, pygltflib.FLOAT, pygltflib.VEC2
+            )
+            attributes["TEXCOORD_0"] = uv_accessor
+
+    # Add material to glTF
+    material_idx = len(gltf.materials)
+    gltf.materials.append(material)
+
+    return material_idx
+
+
+def _add_texture_to_gltf(
+    gltf: pygltflib.GLTF2,
+    binary_data: bytearray,
+    texture_info: Dict[str, Any],
+) -> int:
+    """Add a texture to the glTF.
+
+    Args:
+        gltf: glTF object
+        binary_data: Binary data buffer
+        texture_info: Texture information from MuJoCo
+
+    Returns:
+        Texture index
+    """
+    tex_data = texture_info["data"]
+    tex_width = texture_info["width"]
+    tex_height = texture_info["height"]
+    tex_channels = texture_info["channels"]
+
+    # Convert texture data to proper format and encode as PNG
+    if tex_channels == 3:
+        # RGB data - need to add alpha channel
+        rgba_data = np.zeros((tex_height, tex_width, 4), dtype=np.uint8)
+        rgba_data[:, :, :3] = tex_data
+        rgba_data[:, :, 3] = 255  # Full alpha
+        image_data = rgba_data
+    else:
+        # Already has alpha or is grayscale
+        image_data = tex_data.astype(np.uint8)
+
+    # Convert to PNG bytes
+    try:
+        import io
+        from PIL import Image
+
+        # Create PIL image
+        if image_data.shape[2] == 4:
+            pil_image = Image.fromarray(image_data, "RGBA")
+        elif image_data.shape[2] == 3:
+            pil_image = Image.fromarray(image_data, "RGB")
+        else:
+            pil_image = Image.fromarray(image_data[:, :, 0], "L")
+
+        # Convert to PNG bytes
+        png_buffer = io.BytesIO()
+        pil_image.save(png_buffer, format="PNG")
+        image_bytes = png_buffer.getvalue()
+        use_png_mime = True
+
+    except ImportError:
+        # Fallback to raw data if PIL not available
+        image_bytes = image_data.flatten().tobytes()
+        use_png_mime = False
+
+    # Add image data to binary buffer
+    image_byte_offset = len(binary_data)
+    binary_data.extend(image_bytes)
+
+    # Create buffer view for image
+    image_buffer_view = pygltflib.BufferView(
+        buffer=0,
+        byteOffset=image_byte_offset,
+        byteLength=len(image_bytes),
+    )
+    image_view_idx = len(gltf.bufferViews)
+    gltf.bufferViews.append(image_buffer_view)
+
+    # Create image
+    image = pygltflib.Image(
+        name=texture_info.get("name", "texture"),
+        bufferView=image_view_idx,
+    )
+
+    # Set mimeType if we encoded as PNG
+    if use_png_mime:
+        image.mimeType = "image/png"
+    image_idx = len(gltf.images)
+    gltf.images.append(image)
+
+    # Create sampler
+    sampler = pygltflib.Sampler(
+        magFilter=pygltflib.LINEAR,
+        minFilter=pygltflib.LINEAR,
+        wrapS=pygltflib.REPEAT,
+        wrapT=pygltflib.REPEAT,
+    )
+    sampler_idx = len(gltf.samplers)
+    gltf.samplers.append(sampler)
+
+    # Create texture
+    texture = pygltflib.Texture(
+        source=image_idx,
+        sampler=sampler_idx,
+        name=texture_info.get("name", "texture"),
+    )
+    texture_idx = len(gltf.textures)
+    gltf.textures.append(texture)
+
+    return texture_idx
 
 
 def matrix_to_quaternion(matrix: np.ndarray) -> np.ndarray:

@@ -1,7 +1,7 @@
 """MuJoCo model building and rendering utilities."""
 
 import numpy as np
-from typing import Optional, List, Tuple, Any
+from typing import Optional, List, Any
 
 from .model_builder import ModelBuilder, RawMesh, quaternion_to_matrix
 from .viewer import GLBViewer
@@ -39,12 +39,17 @@ def extract_mujoco_geometry(model) -> List[Any]:
             geom_quat = model.geom_quat[geom_id]
             geom_rgba = model.geom_rgba[geom_id]
             geom_group = model.geom_group[geom_id]
+            geom_matid = model.geom_matid[geom_id]
 
             # Only include geoms from groups 0, 1, and 2
             if geom_group > 2:
                 continue
 
             mesh = None
+            material_info = None
+
+            # Extract material and texture info for all geometries
+            material_info = _extract_material_info(model, geom_matid)
 
             # Keep geometry in MuJoCo coordinates - root transform handles conversion
             mj_pos = geom_pos
@@ -60,10 +65,14 @@ def extract_mujoco_geometry(model) -> List[Any]:
                 mesh = ModelBuilder.generate_sphere_mesh(
                     radius=geom_size[0], color=geom_rgba
                 )
+                if mesh and material_info:
+                    mesh.material = material_info
             elif geom_type == mujoco.mjtGeom.mjGEOM_BOX:
                 mesh = ModelBuilder.generate_box_mesh(
                     half_sizes=geom_size[:3], color=geom_rgba
                 )
+                if mesh and material_info:
+                    mesh.material = material_info
             elif geom_type == mujoco.mjtGeom.mjGEOM_PLANE:
                 # Planes in MuJoCo are infinite, we'll make a large finite plane
                 plane_size = (
@@ -74,11 +83,15 @@ def extract_mujoco_geometry(model) -> List[Any]:
                 mesh = ModelBuilder.generate_plane_mesh(
                     size=plane_size * 2, color=geom_rgba
                 )
+                if mesh and material_info:
+                    mesh.material = material_info
             elif geom_type == mujoco.mjtGeom.mjGEOM_CAPSULE:
                 # Capsule in MuJoCo: geom_size[0] is radius, geom_size[1] is half-length
                 mesh = ModelBuilder.generate_capsule_mesh(
                     radius=geom_size[0], half_length=geom_size[1], color=geom_rgba
                 )
+                if mesh and material_info:
+                    mesh.material = material_info
             elif geom_type == mujoco.mjtGeom.mjGEOM_MESH:
                 geom_dataid = model.geom_dataid[geom_id]
                 if geom_dataid >= 0:
@@ -115,14 +128,16 @@ def extract_mujoco_geometry(model) -> List[Any]:
                         normals=normals.astype(np.float32),
                         indices=faces.flatten().astype(np.uint32),
                         colors=colors.astype(np.float32),
+                        material=material_info,
                     )
 
             if mesh is not None:
-                # Store the mesh with its transform
+                # Store the mesh with its transform and material info
                 mesh_with_transform = {
                     "mesh": mesh,
                     "transform": transform,
                     "is_plane": geom_type == mujoco.mjtGeom.mjGEOM_PLANE,
+                    "material": material_info,
                 }
                 meshes.append(mesh_with_transform)
 
@@ -287,6 +302,10 @@ class MujocoRender:
                 geom_quat = model.geom_quat[geom_id]
                 geom_size = model.geom_size[geom_id]
                 color = model.geom_rgba[geom_id].tolist()
+                geom_matid = model.geom_matid[geom_id]
+
+                # Extract material info
+                material_info = _extract_material_info(model, geom_matid)
 
                 # Only format conversion for quaternions (NOT coordinate conversion)
                 formatted_quat = quat_wxyz_to_xyzw(geom_quat)
@@ -321,6 +340,7 @@ class MujocoRender:
                         normals,
                         indices,
                         color,
+                        material_info,  # Pass material info
                     )
 
         # Add cameras to their respective bodies
@@ -350,11 +370,6 @@ class MujocoRender:
             transform = np.eye(4)
             transform[:3, :3] = quaternion_to_matrix(cam_quat)
             transform[:3, 3] = cam_pos
-
-            camera_with_transform = {
-                "camera": camera_data,
-                "transform": transform,
-            }
 
             # Add camera to the body by creating a mesh entry for it
             self.model_builder.add_camera(
@@ -476,8 +491,8 @@ class MujocoRender:
             for i in face_indices:
                 vertices.append(corners[i])
                 normals.append(normal)
-            indices.extend([idx, idx + 1, idx + 2])
-            indices.extend([idx, idx + 2, idx + 3])
+            indices.extend([idx, idx + 2, idx + 1])
+            indices.extend([idx, idx + 3, idx + 2])
             idx += 4
         return vertices, normals, indices
 
@@ -695,3 +710,62 @@ class _AnimationContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.render._animation_context = None
+
+
+def _extract_material_info(model, geom_matid):
+    """Extract material and texture information from MuJoCo model.
+
+    Args:
+        model: MuJoCo model
+        geom_matid: Material ID for the geometry (-1 if no material)
+
+    Returns:
+        Dict with material info or None if no material
+    """
+    if geom_matid < 0 or geom_matid >= model.nmat:
+        return None
+
+    try:
+        import mujoco
+    except ImportError:
+        return None
+
+    material_info = {
+        "name": mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_MATERIAL, geom_matid),
+        "rgba": model.mat_rgba[geom_matid].copy(),
+        "texrepeat": model.mat_texrepeat[geom_matid].copy(),
+        "texuniform": bool(model.mat_texuniform[geom_matid]),
+        "textures": {},
+    }
+
+    # Extract texture information for each texture type
+    # mat_texid[matid] contains texture IDs for different texture types
+    # Index 0 is usually the diffuse texture
+    for tex_type, tex_id in enumerate(model.mat_texid[geom_matid]):
+        if tex_id >= 0 and tex_id < model.ntex:
+            tex_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_TEXTURE, tex_id)
+
+            # Extract texture data
+            tex_width = model.tex_width[tex_id]
+            tex_height = model.tex_height[tex_id]
+            tex_type_val = model.tex_type[tex_id]
+            tex_adr = model.tex_adr[tex_id]
+            tex_nchannel = model.tex_nchannel[tex_id]
+
+            # Get texture data
+            tex_size = tex_width * tex_height * tex_nchannel
+            tex_data = model.tex_data[tex_adr : tex_adr + tex_size]
+
+            # Reshape to proper format (height, width, channels)
+            tex_data = tex_data.reshape(tex_height, tex_width, tex_nchannel)
+
+            material_info["textures"][tex_type] = {
+                "name": tex_name,
+                "width": tex_width,
+                "height": tex_height,
+                "type": tex_type_val,
+                "channels": tex_nchannel,
+                "data": tex_data.copy(),
+            }
+
+    return material_info
