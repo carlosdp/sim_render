@@ -514,7 +514,7 @@ def _add_material_with_textures(
             min_coords = np.min(vertices, axis=0)
             max_coords = np.max(vertices, axis=0)
             size = max_coords - min_coords
-            
+
             uvs = []
             for vertex in vertices:
                 # Check if this is a plane by looking at which coordinate is constant
