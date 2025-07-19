@@ -31,12 +31,6 @@ def _(InteractiveRenderWrapper, gym_env):
         env.render()
 
     env
-    return (env,)
-
-
-@app.cell
-def _(env):
-    env.save("output.glb")
     return
 
 

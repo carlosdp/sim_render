@@ -1,7 +1,7 @@
 """Core model building utilities for 3D scene construction."""
 
 import numpy as np
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 from dataclasses import dataclass
 
 
@@ -561,6 +561,177 @@ class ModelBuilder:
             for s in range(sectors):
                 first = bot_hem_start + r * (sectors + 1) + s
                 second = first + sectors + 1
+
+                indices.extend([first, second, first + 1])
+                indices.extend([second, second + 1, first + 1])
+
+        vertices = np.array(vertices, dtype=np.float32)
+        normals = np.array(normals, dtype=np.float32)
+        indices = np.array(indices, dtype=np.uint32)
+
+        if color is not None:
+            colors = np.tile(color, (len(vertices), 1))
+        else:
+            colors = np.ones((len(vertices), 4), dtype=np.float32)
+
+        return RawMesh(
+            vertices=vertices, normals=normals, indices=indices, colors=colors
+        )
+
+    @staticmethod
+    def generate_cylinder_mesh(
+        radius: float = 1.0,
+        half_length: float = 1.0,
+        sectors: int = 32,
+        color: Optional[np.ndarray] = None,
+    ) -> RawMesh:
+        """Generate a cylinder mesh.
+
+        Args:
+            radius: Radius of the cylinder
+            half_length: Half the length of the cylinder
+            sectors: Number of sectors around the cylinder
+            color: Optional RGBA color
+
+        Returns:
+            RawMesh: The generated cylinder mesh
+        """
+        vertices = []
+        normals = []
+        indices = []
+
+        # Generate cylinder body
+        for z_idx, z in enumerate([half_length, -half_length]):
+            for s in range(sectors + 1):
+                theta = 2 * np.pi * s / sectors
+                x = radius * np.cos(theta)
+                y = radius * np.sin(theta)
+                vertices.append([x, y, z])
+                normals.append([np.cos(theta), np.sin(theta), 0])
+
+        # Generate cylinder side indices
+        for s in range(sectors):
+            # Top ring vertex index
+            top = s
+            # Bottom ring vertex index
+            bottom = (sectors + 1) + s
+
+            # Two triangles per quad
+            indices.extend([top, bottom, top + 1])
+            indices.extend([top + 1, bottom, bottom + 1])
+
+        # Generate top cap
+        center_top = len(vertices)
+        vertices.append([0, 0, half_length])
+        normals.append([0, 0, 1])
+
+        for s in range(sectors):
+            theta = 2 * np.pi * s / sectors
+            x = radius * np.cos(theta)
+            y = radius * np.sin(theta)
+            vertices.append([x, y, half_length])
+            normals.append([0, 0, 1])
+
+        # Top cap indices
+        for s in range(sectors):
+            indices.extend(
+                [center_top, center_top + s + 1, center_top + ((s + 1) % sectors) + 1]
+            )
+
+        # Generate bottom cap
+        center_bottom = len(vertices)
+        vertices.append([0, 0, -half_length])
+        normals.append([0, 0, -1])
+
+        for s in range(sectors):
+            theta = 2 * np.pi * s / sectors
+            x = radius * np.cos(theta)
+            y = radius * np.sin(theta)
+            vertices.append([x, y, -half_length])
+            normals.append([0, 0, -1])
+
+        # Bottom cap indices (reversed winding)
+        for s in range(sectors):
+            indices.extend(
+                [
+                    center_bottom,
+                    center_bottom + ((s + 1) % sectors) + 1,
+                    center_bottom + s + 1,
+                ]
+            )
+
+        vertices = np.array(vertices, dtype=np.float32)
+        normals = np.array(normals, dtype=np.float32)
+        indices = np.array(indices, dtype=np.uint32)
+
+        if color is not None:
+            colors = np.tile(color, (len(vertices), 1))
+        else:
+            colors = np.ones((len(vertices), 4), dtype=np.float32)
+
+        return RawMesh(
+            vertices=vertices, normals=normals, indices=indices, colors=colors
+        )
+
+    @staticmethod
+    def generate_ellipsoid_mesh(
+        radii: Union[float, List[float], np.ndarray] = 1.0,
+        longitude_segments: int = 32,
+        latitude_segments: int = 16,
+        color: Optional[np.ndarray] = None,
+    ) -> RawMesh:
+        """Generate an ellipsoid mesh.
+
+        Args:
+            radii: Either a single radius (for sphere) or [rx, ry, rz] for ellipsoid
+            longitude_segments: Number of longitude segments
+            latitude_segments: Number of latitude segments
+            color: Optional RGBA color
+
+        Returns:
+            RawMesh: The generated ellipsoid mesh
+        """
+        vertices = []
+        normals = []
+        indices = []
+
+        # Handle radii input
+        if isinstance(radii, (int, float)):
+            rx = ry = rz = float(radii)
+        else:
+            rx, ry, rz = radii
+
+        # Generate vertices and normals
+        for lat in range(latitude_segments + 1):
+            theta = lat * np.pi / latitude_segments
+            sin_theta = np.sin(theta)
+            cos_theta = np.cos(theta)
+
+            for lon in range(longitude_segments + 1):
+                phi = lon * 2.0 * np.pi / longitude_segments
+                sin_phi = np.sin(phi)
+                cos_phi = np.cos(phi)
+
+                # Unit sphere coordinates
+                x = cos_phi * sin_theta
+                y = sin_phi * sin_theta
+                z = cos_theta
+
+                # Scale by radii to get ellipsoid
+                vertices.append([x * rx, y * ry, z * rz])
+
+                # Normal is the normalized gradient of the ellipsoid equation
+                # For ellipsoid: (x/rx)^2 + (y/ry)^2 + (z/rz)^2 = 1
+                # Gradient: [2x/rx^2, 2y/ry^2, 2z/rz^2]
+                normal = np.array([x / (rx * rx), y / (ry * ry), z / (rz * rz)])
+                normal = normal / np.linalg.norm(normal)
+                normals.append(normal.tolist())
+
+        # Generate indices
+        for lat in range(latitude_segments):
+            for lon in range(longitude_segments):
+                first = lat * (longitude_segments + 1) + lon
+                second = first + longitude_segments + 1
 
                 indices.extend([first, second, first + 1])
                 indices.extend([second, second + 1, first + 1])

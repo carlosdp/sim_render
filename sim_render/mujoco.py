@@ -92,6 +92,27 @@ def extract_mujoco_geometry(model) -> List[Any]:
                 )
                 if mesh and material_info:
                     mesh.material = material_info
+            elif geom_type == mujoco.mjtGeom.mjGEOM_CYLINDER:
+                # Cylinder in MuJoCo: geom_size[0] is radius, geom_size[1] is half-length
+                mesh = ModelBuilder.generate_cylinder_mesh(
+                    radius=geom_size[0], half_length=geom_size[1], color=geom_rgba
+                )
+                if mesh and material_info:
+                    mesh.material = material_info
+            elif geom_type == mujoco.mjtGeom.mjGEOM_ELLIPSOID:
+                # Ellipsoid in MuJoCo: geom_size[0:3] are the three radii
+                mesh = ModelBuilder.generate_ellipsoid_mesh(
+                    radii=geom_size[:3], color=geom_rgba
+                )
+                if mesh and material_info:
+                    mesh.material = material_info
+            elif geom_type == mujoco.mjtGeom.mjGEOM_HFIELD:
+                # Height field in MuJoCo
+                hfield_id = model.geom_dataid[geom_id]
+                if hfield_id >= 0:
+                    mesh = _generate_hfield_mesh(model, hfield_id, geom_size, geom_rgba)
+                    if mesh and material_info:
+                        mesh.material = material_info
             elif geom_type == mujoco.mjtGeom.mjGEOM_MESH:
                 geom_dataid = model.geom_dataid[geom_id]
                 if geom_dataid >= 0:
@@ -326,6 +347,18 @@ class MujocoRender:
                 elif geom_type == mujoco.mjtGeom.mjGEOM_CAPSULE:
                     vertices, normals, indices = self._generate_capsule_mesh(
                         geom_size[0], geom_size[1]
+                    )
+                elif geom_type == mujoco.mjtGeom.mjGEOM_CYLINDER:
+                    vertices, normals, indices = self._generate_cylinder_mesh(
+                        geom_size[0], geom_size[1]
+                    )
+                elif geom_type == mujoco.mjtGeom.mjGEOM_ELLIPSOID:
+                    vertices, normals, indices = self._generate_ellipsoid_mesh(
+                        geom_size[:3]
+                    )
+                elif geom_type == mujoco.mjtGeom.mjGEOM_HFIELD:
+                    vertices, normals, indices = self._generate_hfield_mesh_data(
+                        model, model.geom_dataid[geom_id], geom_size
                     )
                 elif geom_type == mujoco.mjtGeom.mjGEOM_MESH:
                     vertices, normals, indices = self._extract_mesh_data(model, geom_id)
@@ -653,6 +686,183 @@ class MujocoRender:
 
         return vertices, normals, indices
 
+    def _generate_cylinder_mesh(self, radius: float, half_length: float):
+        """Generate cylinder mesh."""
+        vertices = []
+        normals = []
+        indices = []
+        sectors = 32
+
+        # Generate cylinder body
+        for z_idx, z in enumerate([half_length, -half_length]):
+            for s in range(sectors + 1):
+                theta = 2 * np.pi * s / sectors
+                x = radius * np.cos(theta)
+                y = radius * np.sin(theta)
+                vertices.append([x, y, z])
+                normals.append([np.cos(theta), np.sin(theta), 0])
+
+        # Generate cylinder side indices
+        for s in range(sectors):
+            # Top ring vertex index
+            top = s
+            # Bottom ring vertex index
+            bottom = (sectors + 1) + s
+
+            # Two triangles per quad
+            indices.extend([top, bottom, top + 1])
+            indices.extend([top + 1, bottom, bottom + 1])
+
+        # Generate top cap
+        center_top = len(vertices)
+        vertices.append([0, 0, half_length])
+        normals.append([0, 0, 1])
+
+        for s in range(sectors):
+            theta = 2 * np.pi * s / sectors
+            x = radius * np.cos(theta)
+            y = radius * np.sin(theta)
+            vertices.append([x, y, half_length])
+            normals.append([0, 0, 1])
+
+        # Top cap indices
+        for s in range(sectors):
+            indices.extend(
+                [center_top, center_top + s + 1, center_top + ((s + 1) % sectors) + 1]
+            )
+
+        # Generate bottom cap
+        center_bottom = len(vertices)
+        vertices.append([0, 0, -half_length])
+        normals.append([0, 0, -1])
+
+        for s in range(sectors):
+            theta = 2 * np.pi * s / sectors
+            x = radius * np.cos(theta)
+            y = radius * np.sin(theta)
+            vertices.append([x, y, -half_length])
+            normals.append([0, 0, -1])
+
+        # Bottom cap indices (reversed winding)
+        for s in range(sectors):
+            indices.extend(
+                [
+                    center_bottom,
+                    center_bottom + ((s + 1) % sectors) + 1,
+                    center_bottom + s + 1,
+                ]
+            )
+
+        return vertices, normals, indices
+
+    def _generate_ellipsoid_mesh(self, radii):
+        """Generate ellipsoid mesh."""
+        vertices = []
+        normals = []
+        indices = []
+        longitude_segments = 32
+        latitude_segments = 16
+        rx, ry, rz = radii
+
+        # Generate vertices and normals
+        for lat in range(latitude_segments + 1):
+            theta = lat * np.pi / latitude_segments
+            sin_theta = np.sin(theta)
+            cos_theta = np.cos(theta)
+
+            for lon in range(longitude_segments + 1):
+                phi = lon * 2.0 * np.pi / longitude_segments
+                sin_phi = np.sin(phi)
+                cos_phi = np.cos(phi)
+
+                # Unit sphere coordinates
+                x = cos_phi * sin_theta
+                y = sin_phi * sin_theta
+                z = cos_theta
+
+                # Scale by radii to get ellipsoid
+                vertices.append([x * rx, y * ry, z * rz])
+
+                # Normal is the normalized gradient of the ellipsoid equation
+                # For ellipsoid: (x/rx)^2 + (y/ry)^2 + (z/rz)^2 = 1
+                # Gradient: [2x/rx^2, 2y/ry^2, 2z/rz^2]
+                normal = np.array([x / (rx * rx), y / (ry * ry), z / (rz * rz)])
+                normal = normal / np.linalg.norm(normal)
+                normals.append(normal.tolist())
+
+        # Generate indices
+        for lat in range(latitude_segments):
+            for lon in range(longitude_segments):
+                first = lat * (longitude_segments + 1) + lon
+                second = first + longitude_segments + 1
+
+                indices.extend([first, second, first + 1])
+                indices.extend([second, second + 1, first + 1])
+
+        return vertices, normals, indices
+
+    def _generate_hfield_mesh_data(self, model, hfield_id, geom_size):
+        """Generate height field mesh data."""
+        if hfield_id < 0:
+            return None, None, None
+
+        # Get height field dimensions
+        nrow = model.hfield_nrow[hfield_id]
+        ncol = model.hfield_ncol[hfield_id]
+        size = model.hfield_size[hfield_id]  # [x_size, y_size, z_base, z_height]
+        data_adr = model.hfield_adr[hfield_id]
+
+        # Get height data
+        hfield_data = model.hfield_data[data_adr : data_adr + nrow * ncol]
+        heights = hfield_data.reshape(nrow, ncol)
+
+        # Generate vertices and normals
+        vertices = []
+        normals = []
+        indices = []
+
+        # Create vertex grid
+        for i in range(nrow):
+            for j in range(ncol):
+                # Calculate position
+                x = (j / (ncol - 1) - 0.5) * size[0] * 2
+                y = (i / (nrow - 1) - 0.5) * size[1] * 2
+                z = size[2] + heights[i, j] * size[3]
+                vertices.append([x, y, z])
+
+        # Calculate normals using central differences
+        for i in range(nrow):
+            for j in range(ncol):
+                # Get neighboring heights for normal calculation
+                h_left = heights[i, max(0, j - 1)]
+                h_right = heights[i, min(ncol - 1, j + 1)]
+                h_up = heights[max(0, i - 1), j]
+                h_down = heights[min(nrow - 1, i + 1), j]
+
+                # Calculate gradients
+                dx = ((h_right - h_left) * size[3]) / (2 * size[0] / (ncol - 1))
+                dy = ((h_down - h_up) * size[3]) / (2 * size[1] / (nrow - 1))
+
+                # Normal is (-dx, -dy, 1) normalized
+                normal = np.array([-dx, -dy, 1.0])
+                normal = normal / np.linalg.norm(normal)
+                normals.append(normal.tolist())
+
+        # Generate indices for triangles
+        for i in range(nrow - 1):
+            for j in range(ncol - 1):
+                # Get vertex indices
+                v0 = i * ncol + j
+                v1 = i * ncol + (j + 1)
+                v2 = (i + 1) * ncol + j
+                v3 = (i + 1) * ncol + (j + 1)
+
+                # Create two triangles per quad
+                indices.extend([v0, v1, v2])
+                indices.extend([v1, v3, v2])
+
+        return vertices, normals, indices
+
     def animation(self, fps: int = 30):
         """Context manager for recording animations.
 
@@ -710,6 +920,79 @@ class _AnimationContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.render._animation_context = None
+
+
+def _generate_hfield_mesh(model, hfield_id, geom_size, color):
+    """Generate height field mesh for extract_mujoco_geometry."""
+    if hfield_id < 0:
+        return None
+
+    # Get height field dimensions
+    nrow = model.hfield_nrow[hfield_id]
+    ncol = model.hfield_ncol[hfield_id]
+    size = model.hfield_size[hfield_id]  # [x_size, y_size, z_base, z_height]
+    data_adr = model.hfield_adr[hfield_id]
+
+    # Get height data
+    hfield_data = model.hfield_data[data_adr : data_adr + nrow * ncol]
+    heights = hfield_data.reshape(nrow, ncol)
+
+    # Generate vertices and normals
+    vertices = []
+    normals = []
+    indices = []
+
+    # Create vertex grid
+    for i in range(nrow):
+        for j in range(ncol):
+            # Calculate position
+            x = (j / (ncol - 1) - 0.5) * size[0] * 2
+            y = (i / (nrow - 1) - 0.5) * size[1] * 2
+            z = size[2] + heights[i, j] * size[3]
+            vertices.append([x, y, z])
+
+    # Calculate normals using central differences
+    for i in range(nrow):
+        for j in range(ncol):
+            # Get neighboring heights for normal calculation
+            h_left = heights[i, max(0, j - 1)]
+            h_right = heights[i, min(ncol - 1, j + 1)]
+            h_up = heights[max(0, i - 1), j]
+            h_down = heights[min(nrow - 1, i + 1), j]
+
+            # Calculate gradients
+            dx = ((h_right - h_left) * size[3]) / (2 * size[0] / (ncol - 1))
+            dy = ((h_down - h_up) * size[3]) / (2 * size[1] / (nrow - 1))
+
+            # Normal is (-dx, -dy, 1) normalized
+            normal = np.array([-dx, -dy, 1.0])
+            normal = normal / np.linalg.norm(normal)
+            normals.append(normal.tolist())
+
+    # Generate indices for triangles
+    for i in range(nrow - 1):
+        for j in range(ncol - 1):
+            # Get vertex indices
+            v0 = i * ncol + j
+            v1 = i * ncol + (j + 1)
+            v2 = (i + 1) * ncol + j
+            v3 = (i + 1) * ncol + (j + 1)
+
+            # Create two triangles per quad
+            indices.extend([v0, v1, v2])
+            indices.extend([v1, v3, v2])
+
+    vertices = np.array(vertices, dtype=np.float32)
+    normals = np.array(normals, dtype=np.float32)
+    indices = np.array(indices, dtype=np.uint32)
+    colors = np.tile(color, (len(vertices), 1))
+
+    return RawMesh(
+        vertices=vertices,
+        normals=normals,
+        indices=indices,
+        colors=colors,
+    )
 
 
 def _extract_material_info(model, geom_matid):
