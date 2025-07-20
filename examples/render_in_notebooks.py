@@ -27,8 +27,14 @@ def _(InteractiveRenderWrapper, gym_env):
     env = InteractiveRenderWrapper(gym_env)
     env.reset(seed=42)
 
-    with env.animation():
+    with env.animation(fps=10):
+      for _ in range(5000):
+        action = env.action_space.sample()
+        observation, reward, terminated, truncated, info = env.step(action)
         env.render()
+
+        if terminated or truncated:
+          observation, info = env.reset()
 
     env
     return
