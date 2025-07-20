@@ -13,7 +13,7 @@ class TestMujocoRender:
         pytest.importorskip("mujoco")
 
         import mujoco
-        from sim_render.mujoco import MujocoRender
+        from simrender.mujoco import MujocoRender
 
         # Create a simple MuJoCo model
         xml = """

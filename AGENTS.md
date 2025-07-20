@@ -2,7 +2,7 @@
 
 ## Package Purpose
 
-`sim_render` is a Python package designed to easily render robotic simulation environments to GLB format, including animations for episodes. The package provides seamless integration with popular robotics simulation frameworks like Gymnasium and MuJoCo, enabling researchers and developers to export their simulation data for visualization, analysis, and sharing.
+`simrender` is a Python package designed to easily render robotic simulation environments to GLB format, including animations for episodes. The package provides seamless integration with popular robotics simulation frameworks like Gymnasium and MuJoCo, enabling researchers and developers to export their simulation data for visualization, analysis, and sharing.
 
 ## Notes
 
@@ -11,7 +11,7 @@
 ## Code Layout
 
 ```
-sim_render/
+simrender/
 ├── __init__.py                 # Package exports and imports
 ├── model_builder.py           # Core 3D scene construction (ModelBuilder class)
 ├── gym.py                     # Gymnasium environment wrapper (InteractiveRenderWrapper)

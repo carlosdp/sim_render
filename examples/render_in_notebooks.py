@@ -8,7 +8,7 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
     import gymnasium as gym
-    from sim_render.gym import InteractiveRenderWrapper
+    from simrender.gym import InteractiveRenderWrapper
 
     return InteractiveRenderWrapper, gym, mo
 

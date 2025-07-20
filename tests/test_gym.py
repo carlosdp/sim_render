@@ -14,7 +14,7 @@ class TestInteractiveRenderWrapper:
         pytest.importorskip("mujoco")
 
         import gymnasium as gym
-        from sim_render.gym import InteractiveRenderWrapper
+        from simrender.gym import InteractiveRenderWrapper
 
         # Try to create a MuJoCo env if available
         try:

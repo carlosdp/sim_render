@@ -584,12 +584,10 @@ def _add_texture_to_gltf(
         from PIL import Image
 
         # Create PIL image
-        if image_data.shape[2] == 4:
-            pil_image = Image.fromarray(image_data, "RGBA")
-        elif image_data.shape[2] == 3:
-            pil_image = Image.fromarray(image_data, "RGB")
+        if image_data.shape[2] == 3 or image_data.shape[2] == 4:
+            pil_image = Image.fromarray(image_data)
         else:
-            pil_image = Image.fromarray(image_data[:, :, 0], "L")
+            pil_image = Image.fromarray(image_data[:, :, 0])
 
         # Convert to PNG bytes
         png_buffer = io.BytesIO()

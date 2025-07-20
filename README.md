@@ -1,19 +1,26 @@
-# sim_render 🎬
+# simrender 🎬
 
-A Python package for easily rendering robotic simulation environments to a web-ready (GLTF) format, including animated episodes for visualization and analysis.
+A Python package for easily rendering robotic simulation environments to a web-ready (GLTF) format, including animated episodes for visualization and analysis. It also supports easy rendering to notebook cells in Jupyter and Marimo.
 
 ## Features
 
-- 🎮 **Gymnasium Integration**: Direct support for Gymnasium environments with `InteractiveRenderWrapper`
-- 🔧 **MuJoCo Support**: Native MuJoCo model and scene rendering with `MujocoRender`
-- 📊 **Animation Recording**: Capture animated episodes with configurable frame rates
 - 🎯 **GLB Export**: Export static scenes and animated sequences to industry-standard GLB format
-- 🎨 **Mesh Generation**: Built-in utilities for generating spheres, boxes, and planes
+- 🎮 **Gymnasium Integration**: Automatic support for Gymnasium environments with `InteractiveRenderWrapper`
+- 📊 **Animation Recording**: Capture animated episodes with configurable capture frame rates
+- 📕 **Notebook Support**: Rendering wrapper classes can be displayed in Jupyter/Marimo notebooks out of the box
+
+### Simulator Support
+
+- [x] MuJoCo
+- [ ] MJX/MuJoCo Warp
+- [ ] Newton
+- [ ] Isaac Sim
+- [ ] Isaac Gym (legacy)
 
 ## Installation
 
 ```bash
-pip install sim_render
+pip install simrender
 ```
 
 ## Usage
@@ -24,7 +31,7 @@ Wrap any Gymnasium environment to enable GLB export:
 
 ```python
 import gymnasium as gym
-from sim_render.gym import InteractiveRenderWrapper
+from simrender.gym import InteractiveRenderWrapper
 
 # Create and wrap environment
 env = gym.make("Ant-v5")
@@ -42,6 +49,9 @@ with env.animation(fps=30):
 
 # Save to GLB file
 env.save("episode.glb")
+
+# or, display it if running in a notebook cell
+env
 ```
 
 ### MuJoCo Models
@@ -50,7 +60,7 @@ For direct MuJoCo model rendering:
 
 ```python
 import mujoco
-from sim_render.mujoco import MujocoRender
+from simrender.mujoco import MujocoRender
 
 # Load MuJoCo model
 model = mujoco.MjModel.from_xml_file("scene.xml")
@@ -71,6 +81,9 @@ with render.animation(fps=10):
         render.render(data)
 
 render.save("animated_sequence.glb")
+
+# or, display it if running in a notebook cell
+render
 ```
 
 ## File Format
